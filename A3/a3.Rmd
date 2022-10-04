@@ -1,0 +1,350 @@
+---
+title: "Econ 573 Assignment 3"
+author: "Harvey Duperier"
+date: '2022-10-04'
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(leaps)
+library(ISLR2)
+data("Boston")
+attach(Boston)
+library(glmnet)
+library(pls)
+library(MASS)
+library(class)
+library(naivebayes)
+```
+
+# Part I
+## Question 2
+
+**2a).** The lasso, relative to least squares, is: *iii.* Less flexible and hence will give improved prediction accuracy when its increase in bias is less than its decrease in variance. This is because the lasso can yield a reduction in variance when compared to least squares in exchange for a small increase in bias, consistently generating more accurate predictions, also making it easier to interpret, making *iii* the correct choice.
+
+**2b).** The ridge regression, relative to least squares, is: *iii.* Less flexible and hence will give improved prediction accuracy when its increase in bias is less than its decrease in variance. This is because, similarly to lasso, the ridge regression can yield a reduction in variance, when compared to least squares, in exchange for a small increase in bias. The relationship between $\lambda$ and variance and bias is important: when it increases, the flexibility of the ridge regression decreases which causes decreased variance, but increased bias, making *iii* the correct choice again.
+
+**2c).** Non-linear methods, relative to least squares, is: *ii.* More flexible and hence will give improved prediction accuracy when its increase in variance is less than its decrease in bias. Contrasting to ridge and lasso methods, non-linear methods work in the opposite way, giving increased prediction accuracy when a decrease in bias gives way to an increase in variance, making *ii* the correct choice.
+
+## Question 3
+
+**3a).** As we increase *s* from 0, the training RSS will: *iv.* Steadily decrease. As we begin to increase *s* from 0, all $\beta$’s will increase from 0 to their least square estimate values. The training RSS for $\beta$’s at 0 will be the maximum and trend downward to the original least squares RSS; therefore, *iv* is the correct choice.
+
+**3b).** As we increase *s* from 0, the test RSS will: *ii.* Decrease initially, and then eventually start increasing in a U shape. When *s*=0 and all $\beta$’s are 0, the model is extremely simple and because of that, has a high test RSS. Beginning to increase *s*, $\beta$ *s* will begin to assume non-zero values and the model begins to fit better, so test RSS originally decreases. Eventually, $\beta$ *s* will approach their OLS values, and as they begin to over fit the training data, test RSS will begin to increase again, forming a U shape and making *ii* the correct choice.
+
+**3c).** As we increase *s* from 0, the variance will: *iii.* Steadily Increase. When *s*=0, the model basically predicts a constant and has almost no variance, but as we increase *s*, the model includes more $\beta$'s, and their values will begin to increase. As the values of $\beta$s become increasingly more dependent on training data, the variance will steadily increase, making *iii* the correct choice.
+
+**3d).** As we increase *s* from 0, the (squared) bias will: *iv.* Steadily Decrease. As we stated in the previous example, when *s*=0, the model basically predicts a constant, so the prediction is far from the actual value, and (squared) bias is high. As we increase *s* from 0 though, more $\beta$’s become non-zero, and the model continues to fit the training data better, thus making bias steadily decrease, and proving *iv* to be the correct choice.
+
+**3e).** As we increase *s* from 0, the irreducible error will: *v.* Remain Constant. Irreducible error is model dependent and therefore increasing *s* from 0 will not change it, making it remain constant and proving *v* to be the best choice.
+
+## Question 10
+**10a).**
+```{r 10a}
+require(tidyverse)
+set.seed(1)
+df <- data.frame(replicate(20, rnorm(n = 1000)))
+
+df %>%
+    reduce(function(y, x) y + ifelse(runif(1) < 0.5,rnorm(1, mean = 5, sd = 1), 0)*x + rnorm(1000)) -> df$Y
+```
+
+**10b).**
+```{r 10b}
+require(caret)
+
+inTrain <- createDataPartition(df$Y, p = 0.1, list = F)
+
+x_train <- df[inTrain, -21]
+y_train <- df[inTrain, 21]
+x_test <- df[-inTrain, -21]
+y_test <- df[-inTrain, 21]
+```
+
+**10c).**
+```{r 10c}
+require(leaps); require(ggplot2); require(dplyr); require(ggthemes)
+
+best_set <- regsubsets(x = x_train, y = y_train, nvmax = 20)
+
+best_set_summary <- summary(best_set)
+
+data_frame(MSE = best_set_summary$rss/900) %>%
+    mutate(id = row_number()) %>%
+    ggplot(aes(id, MSE)) +
+    geom_line() + geom_point(type = 9) +
+    xlab('Number of Variables Used') +
+    ggtitle('MSE on training set') +
+    theme_tufte() +
+    scale_x_continuous(breaks = 1:20)
+
+
+```
+
+**10d).**
+```{r 10d}
+test_errors = rep(NA,19)
+test.mat <- model.matrix(Y ~ ., data = df[-inTrain,])
+for (i in 1:20){
+        coefs = coef(best_set, id=i)
+        pred = test.mat[,names(coefs)]%*%coefs
+        test_errors[i] = mean((y_test-pred)^2)
+}
+
+
+data_frame(MSE = test_errors) %>%
+    mutate(id = row_number()) %>%
+    ggplot(aes(id, MSE)) +
+    geom_line() + geom_point(type = 9) +
+    xlab('Number of Variables Used') +
+    ggtitle('MSE on testing set') +
+    theme_tufte() +
+    scale_x_continuous(breaks = 1:20)
+```
+Ran out of time on 10 and couldn't get a function working.
+
+## Question 11
+
+**11a).**
+
+### Best Subset Selection
+```{r 11ai}
+predict.regsubsets = function(object, newdata, id, ...) {
+  formTest = as.formula(object$call[[2]])
+  mat = model.matrix(formTest, newdata)
+  coefi = coef(object, id = id)
+  mat[, names(coefi)] %*% coefi
+}
+
+k = 10
+p = ncol(Boston) - 1
+folds = sample(rep(1:k, length = nrow(Boston)))
+cv.errors = matrix(NA, k, p)
+for (i in 1:k) {
+  bestFit = regsubsets(crim ~ ., data = Boston[folds != i, ], nvmax = p)
+  for (j in 1:p) {
+    pred = predict(bestFit, Boston[folds == i, ], id = j)
+    cv.errors[i, j] = mean((Boston$crim[folds == i] - pred)^2)
+  }
+}
+rmse.cv = sqrt(apply(cv.errors, 2, mean))
+plot(rmse.cv, pch = 19, type = "b")
+summary(bestFit)
+which.min(rmse.cv)
+bostonBSMErr=(rmse.cv[which.min(rmse.cv)])^2
+bostonBSMErr
+```
+Cross-validation selects a 10-variable model based on the Test MSE. At 9-variables, the CV estimate for the test MSE is 42.82544–the lowest MSE reported.
+
+### The Lasso
+```{r 11aii}
+bostonX=model.matrix(crim~., data=Boston)[,-1]
+bostonY=Boston$crim
+bostonLasso=cv.glmnet(bostonX, bostonY, alpha=1, type.measure = "mse")
+plot(bostonLasso)
+```
+To predict the training model on the test model, I need to find the lambda that reduces error the most.
+```{r 11aiii}
+coef(bostonLasso)
+bostonLassoErr<-(bostonLasso$cvm[bostonLasso$lambda==bostonLasso$lambda.1se])
+bostonLassoErr
+```
+Lasso is only a variable reduction method and because of this, the lasso model that reduces the MSE only includes 1 variable (rad) and has an MSE of 56.87152.
+
+### Ridge Regression
+```{r 11aiv}
+bostonRidgeReg=cv.glmnet(bostonX, bostonY, type.measure = "mse", alpha=0)
+plot(bostonRidgeReg)
+coef(bostonRidgeReg)
+bostonRidgeErr<-bostonRidgeReg$cvm[bostonRidgeReg$lambda==bostonRidgeReg$lambda.lse]
+bostonRidgeErr
+```
+Ridge Regression attempts to keep all variables unlike the Lasso method.
+Compared to the Best Subset Selection and the Lasso, the Ridge Regression does not perform well.
+
+### PCR
+```{r 11av}
+bostonPCR = pcr(crim~., data=Boston, scale=TRUE, validation="CV")
+summary(bostonPCR)
+```
+The most appropriate PCR model would include 10 components and that would explain 98.33% of the predictors by the model. At 10 components, MSE is 43.58224. Overall, this model works pretty well.
+
+**11b).**
+Since the model that had the lowest cross-val error is the best subset selection model, I would propose this model as I computed above. This model also has an MSE of 42.82544.
+
+**11c).**
+The Best Subset Selection Model only includes 10 variable as I explained above. More variation of the response would be included if the model were to include the left out features. Since we are aiming to have low variance and low MSE in the model prediction accuracy, this is the best.
+
+# Part II
+
+## Question 4
+
+**4a).** On average,we will use about 10% of the available observations to make the prediction.
+
+**4b).** On average, we will use about 1% of the available observations to make the prediction.
+
+**4c).** On average, we will use $$10^{-98}$$% of the available observation to make the prediction because $$0.10^{100}$$*100 = $$10^{-98}$$%.
+
+**4d).** Observations that are near any given test observation decrease exponentially as *p* increases linearly based off my observations from parts (a)-(c). So basically, we *p* nears infinity, the percent of available observations we use to make the predictions approaches 0.
+
+**4e).** 
+    **i).** *p*=1, length = 0.10
+    **ii).** *p*=2, length = $$\sqrt{0.10}$$
+    **iii).** *p*=100, length = $$0.10^{1/100}$$
+
+## Question 8
+
+Based off these results we should prefer to use the logistic regression for classification of new observations because the 1-nearest neighbors method would have a test error rate of 36% whereas the logistic regression has a lower test error rate of 30%.
+
+## Question 11
+
+  **i)** $$a_{k}$$=$\log(\frac{\pi_{k}}{\pi_{K}})$
+  
+  **ii)** $$b_{kj}$$=$\log(\frac{b_{kj}x_{j}}{b_{K}x_{j}})$
+  
+  **ii)** $$c_{kjl}$$=$\log(\frac{c_{kjl}x_{j}x_{l}}{c_{Kjl}x_{j}x_{l}})$
+  
+## Question 12
+
+Ran out of time to do this.
+
+## Question 13
+
+**a).**
+```{r 13a}
+data(Weekly)
+summary(Weekly)
+pairs(Weekly)
+cor(Weekly[ ,-9])
+```
+There appears to be a positive correlation between the Voluma and Year variables.
+
+**b).**
+```{r 13b}
+glmf=glm(Direction~Lag1+Lag2+Lag3+Lag4+Lag5+Volume, data = Weekly, family = binomial)
+summary (glmf)
+```
+There isnt a variable that shows great significance, but Lag2 shows a little.
+
+**c).**
+```{r 13c}
+glmprob.wk = predict(glmf, type = "response")
+glmpred.wk = rep("Down", length(glmprob.wk)) 
+glmpred.wk[glmprob.wk > 0.5] <- "Up"
+
+table(glmpred.wk, Weekly$Direction)
+mean(glmpred.wk == Weekly$Direction)
+```
+The model is telling us that about 56% of the responses in the market are correctly predicted.
+
+**d).**
+```{r 13d}
+train=(Weekly$Year<2009)
+weekly09=Weekly[!train ,]
+direction09=Weekly$Direction[!train]
+dim(weekly09)
+glm_fit=glm(Direction~Lag2, data = Weekly,family=binomial ,subset=train)
+glm_probability=predict (glm_fit,weekly09, type="response")
+glm_prediction=rep("Down",104)
+glm_prediction[glm_probability >.5]=" Up"
+table(glm_prediction ,direction09)
+```
+This is telling use that we correctly predicted the response of the market about 62.5% of the time.
+
+**e).**
+```{r 13e}
+ldafit=lda(Direction~Lag2 ,data = Weekly ,subset=train)
+ldafit
+lda.prediction=predict(ldafit , weekly09)
+names(lda.prediction)
+ldaclass=lda.prediction$class
+table(ldaclass , direction09)
+```
+Using the LDA method created the same results as the method used in part d.
+
+**f).**
+```{r 13f}
+weeklyqda=qda(Direction~Lag2 ,data=Weekly ,subset=train)
+weeklyqda
+classqda=predict(weeklyqda ,weekly09)$class
+table(classqda ,direction09)
+```
+Using the qda model, we correctly predicted the response about 58.65% of the time.
+
+**g).**
+```{r 13g}
+trainX=cbind(Weekly$Lag2)[train ,]
+testX=cbind(Weekly$Lag2)[!train ,]
+direction.train =Weekly$Direction [train]
+dim(trainX)= c(985,1)
+dim(testX)=c(104,1)
+set.seed(1)
+knnprediction=knn(trainX,testX,direction.train ,k=1)
+table(knnprediction ,direction09)
+```
+Using our KNN model, we obtained correct predictions about 50% of the time. 
+
+**h).**
+```{r 13h}
+nbayes=naive_bayes(Direction~Lag2 ,data=Weekly ,subset=train)
+nbayes
+nbayes.class=predict(nbayes ,weekly09)
+table(nbayes.class ,direction09)
+```
+Using the native Bayes model, we obtained correct predictions about 58.65% of the time which is the same performance as the qda model.
+
+**i).**
+The method that appears the provide the best results on the data is the regression model with 62.5% of correct predictions.
+
+**j).**
+```{r 13j}
+glm2=glm(Direction~Lag2:Lag3, data = Weekly,family=binomial ,subset=train)
+glmprobability2=predict (glm_fit,weekly09, type="response")
+glmprediction2=rep("Down",104)
+glmprediction2[glmprobability2 >.5]=" Up"
+table(glmprediction2 ,direction09)
+```
+Looking at the relationship between Lag2 and Lag3, the glm model correctly predicted the market about 62.5% of the time.
+```{r 13ji}
+lda2=lda(Direction~Lag2^2 ,data = Weekly ,subset=train)
+lda2
+ldapred2=predict(lda2 , weekly09)
+names(ldapred2)
+lda2class=ldapred2$class
+table(lda2class , direction09)
+```
+Squaring Lag2, the LDA model rises to correct predictions about 62.5% of the time as well.
+```{r 13jii}
+qda2=qda(Direction~Lag2:Lag3 ,data=Weekly ,subset=train)
+qda2
+classqda2=predict(qda2 ,weekly09)$class
+table(classqda2 ,direction09)
+```
+Using the QDA model to compared Lag2 and Lag3, this rises to correct predictions obtained about 56.73% of the time.
+```{r 13jiv}
+Xtrain=cbind(Weekly$Lag2)[train ,]
+Xtest=cbind(Weekly$Lag2)[!train ,]
+Directiontrain =Weekly$Direction [train]
+dim(Xtrain)= c(985,1)
+dim(Xtest)=c(104,1)
+set.seed(1)
+knn2=knn(Xtrain,Xtest,Directiontrain ,k=15)
+table(knn2 ,direction09)
+```
+After setting K=15, the KNN model rises to 58.65% of correct predictions
+```{r 13jv}
+Xtrain2=cbind(Weekly$Lag2)[train ,]
+Xtest2=cbind(Weekly$Lag2)[!train ,]
+Directiontrain2 =Weekly$Direction [train]
+dim(Xtrain2)= c(985,1)
+dim(Xtest2)=c(104,1)
+set.seed(1)
+knn3=knn(Xtrain2,Xtest2,Directiontrain2 ,k=25)
+table(knn3 ,direction09)
+```
+When setting K=25, the QDA model correctly predicted the market about 52.88% of the time.
+
